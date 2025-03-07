@@ -1,0 +1,10 @@
+runtime: google
+app_engine_apis: true
+env_variables:
+  PROJECT: azt.joonix.net:azt-dev
+  REGION: europe-west1
+handlers:
+- url: /.*
+  script: auto
+  login: required
+  secure: always
