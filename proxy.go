@@ -15,7 +15,7 @@ import (
 	"strings"
 
 	dataprocpb "cloud.google.com/go/dataproc/apiv1/dataprocpb"
-	dataproc "cloud.google.com/go/dataproc/apiv1@v1.12.0"
+	dataproc "cloud.google.com/go/dataproc/apiv1"
 
 	"golang.org/x/net/http2"
 	"golang.org/x/oauth2"
