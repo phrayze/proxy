@@ -164,6 +164,11 @@ func targetBackendURL(r *http.Request) (*url.URL, error) {
 	targetProject := os.Getenv("PROJECT")
 	targetRegion := os.Getenv("REGION")
 	targetCluster := os.Getenv("CLUSTER")
+	log.Printf("GCP Project: " + targetProject)
+	log.Printf("GCP Region: " + targetRegion)
+	log.Printf("GCP DataProc Cluster: " + targetCluster)
+	log.Printf("Request?: " + r.Host)
+
 	if len(targetCluster) > 0 {
 		return clusterURL(r.Context(), targetProject, targetRegion, targetCluster)
 	}
@@ -186,6 +191,7 @@ func proxy() http.Handler {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		log.Printf("backendURL: %+v", backendURL)
 		proxy := httputil.NewSingleHostReverseProxy(backendURL)
 		if backendURL.Scheme == "http" {
 			proxy.Transport = &http2.Transport{
