@@ -16,12 +16,14 @@ import (
 
 	dataproc "cloud.google.com/go/dataproc/apiv1"
 	"cloud.google.com/go/dataproc/apiv1/dataprocpb"
-	gtransport "google.golang.org/api/transport/grpc"
 
 	"golang.org/x/net/http2"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option" // Import insecure credentials
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
 )
 
 var (
@@ -90,17 +92,18 @@ func pathAllowed(path string) bool {
 	return false
 }
 
-func NewClusterControllerClient(ctx context.Context, opts ...option.ClientOption) (dataproc.ClusterControllerClient, error) {
-	connPool, err := gtransport.DialPool(ctx, opts...)
+func NewClusterControllerClient(ctx context.Context, opts ...option.ClientOption) (*dataproc.ClusterControllerClient, error) {
+	conn, err := grpc.Dial(endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock()) // Corrected line
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("failed to dial: %v", err)
 	}
-	clusterControllerClient, err := dataproc.NewClusterControllerClient(ctx, option.WithGRPCConn(connPool))
+	clusterControllerClient, err := dataproc.NewClusterControllerClient(ctx, append(opts, option.WithGRPCConn(conn))...) // Corrected line
 	if err != nil {
 		return nil, err
 	}
-	return clusterControllerClient, nil
+	return clusterControllerClient, nil // Corrected line
 }
+
 
 func clusterURL(ctx context.Context, project, region, clusterName string) (*url.URL, error) {
 	endpoint := region + "-dataproc.googleapis.com:443"
