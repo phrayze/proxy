@@ -89,20 +89,7 @@ func pathAllowed(path string) bool {
 	}
 	return false
 }
-/*
-// NewClusterControllerClient creates a new cluster controller client.
-func NewClusterControllerClient(ctx context.Context, opts ...option.ClientOption) (*dataproc.ClusterControllerClient, error) {
-	conn, err := grpc.Dial(endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock()) // Corrected line
-	if err != nil {
-		return nil, fmt.Errorf("failed to dial: %v", err)
-	}
-	clusterControllerClient, err := dataproc.NewClusterControllerClient(ctx, option.WithGRPCConn(conn))
-	if err != nil {
-		return nil, err
-	}
-	return clusterControllerClient, nil
-}
-*/
+
 func NewClusterControllerClient(ctx context.Context, opts ...option.ClientOption) (dataproc.ClusterControllerClient, error) {
 	connPool, err := gtransport.DialPool(ctx, opts...)
 	if err != nil {
