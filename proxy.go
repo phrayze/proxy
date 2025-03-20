@@ -106,7 +106,7 @@ func NewClusterControllerClient(ctx context.Context, opts ...option.ClientOption
 func NewClusterControllerClient(ctx context.Context, opts ...option.ClientOption) (dataproc.ClusterControllerClient, error) {
 	connPool, err := gtransport.DialPool(ctx, opts...)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	clusterControllerClient, err := dataproc.NewClusterControllerClient(ctx, option.WithGRPCConn(connPool))
 	if err != nil {
