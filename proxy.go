@@ -108,8 +108,10 @@ func NewClusterControllerClient(ctx context.Context, opts ...option.ClientOption
 	if err != nil {
 		return nil, err
 	}
-	clusterControllerClient := dataproc.NewClusterControllerClient(connPool)
-	
+	clusterControllerClient, err := dataproc.NewClusterControllerClient(connPool)
+		if err != nil {
+		return nil, err
+	}
 	return clusterControllerClient, nil
 }
 
