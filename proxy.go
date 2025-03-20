@@ -1,4 +1,3 @@
-// authproxy proxies HTTP requests to a backend while adding auth information to every request.
 package main
 
 import (
@@ -13,25 +12,20 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	dataproc "cloud.google.com/go/dataproc/apiv1"
 	"cloud.google.com/go/dataproc/apiv1/dataprocpb"
-
 	"golang.org/x/net/http2"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
-	"google.golang.org/api/option" // Import insecure credentials
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-
+	"google.golang.org/api/option"
 )
 
-var (
-	backend             = flag.String("backend", "", "url of the backend HTTP server")
-	allowedMethods      = flag.String("allowed-methods", "GET, HEAD", "Set of allowed HTTP methods")
-	allowedPathPrefixes = flag.String("allowed-path-prefixes", "/", "Set of allowed HTTP request URL paths")
-	endpoint            = "" // will be defined later
-)
+var allowedMethods = []string{http.MethodGet, http.MethodHead}
+var allowedPathPrefixes = []string{"/"}
+var reusableTokenSource oauth2.TokenSource
+
 // configHelperResp corresponds to the JSON output of the `gcloud config-helper` command.
 type configHelperResp struct {
 	Credential struct {
@@ -73,9 +67,8 @@ func defaultTokenSource(ctx context.Context) oauth2.TokenSource {
 }
 
 func methodAllowed(method string) bool {
-	allowed := strings.Split(*allowedMethods, ",")
-	for _, allowedMethod := range allowed {
-		if method == allowedMethod {
+	for _, allowed := range allowedMethods {
+		if method == allowed {
 			return true
 		}
 	}
@@ -83,8 +76,7 @@ func methodAllowed(method string) bool {
 }
 
 func pathAllowed(path string) bool {
-	prefixes := strings.Split(*allowedPathPrefixes, ",")
-	for _, allowedPrefix := range prefixes {
+	for _, allowedPrefix := range allowedPathPrefixes {
 		if strings.HasPrefix(path, allowedPrefix) {
 			return true
 		}
@@ -92,24 +84,10 @@ func pathAllowed(path string) bool {
 	return false
 }
 
-func NewClusterControllerClient(ctx context.Context, opts ...option.ClientOption) (*dataproc.ClusterControllerClient, error) {
-	conn, err := grpc.Dial(endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock()) // Corrected line
-	if err != nil {
-		return nil, fmt.Errorf("failed to dial: %v", err)
-	}
-	clusterControllerClient, err := dataproc.NewClusterControllerClient(ctx, append(opts, option.WithGRPCConn(conn))...) // Corrected line
-	if err != nil {
-		return nil, err
-	}
-	return clusterControllerClient, nil // Corrected line
-}
-
-
 func clusterURL(ctx context.Context, project, region, clusterName string) (*url.URL, error) {
 	endpoint := region + "-dataproc.googleapis.com:443"
 	// Create a new Dataproc client.
-	//define endpoint here as the region is known
-	client, err := NewClusterControllerClient(ctx, option.WithEndpoint(endpoint))
+	client, err := dataproc.NewClusterControllerClient(ctx, option.WithEndpoint(endpoint))
 	if err != nil {
 		log.Fatalf("failed to create client: %v", err)
 	}
@@ -127,17 +105,6 @@ func clusterURL(ctx context.Context, project, region, clusterName string) (*url.
 		log.Fatalf("failed to get cluster: %v", err)
 	}
 
-	/*
-	// Check if InternalIpOnly is empty before using it
-	if cluster.Config == nil || cluster.Config.GceClusterConfig == nil {
-		return nil, fmt.Errorf("cluster %s has no GceClusterConfig", clusterName)
-	}
-
-	if !cluster.Config.GceClusterConfig.GetInternalIpOnly() {
-		return nil, fmt.Errorf("cluster %s is not configured for internal IP only", clusterName)
-	}
-	*/
-
 	for _, endpoint := range cluster.Config.EndpointConfig.HttpPorts {
 		u, err := url.Parse(endpoint)
 		if err != nil {
@@ -150,73 +117,81 @@ func clusterURL(ctx context.Context, project, region, clusterName string) (*url.
 }
 
 func targetBackendURL(r *http.Request) (*url.URL, error) {
-	if len(*backend) > 0 {
-		return url.Parse(*backend)
-	}
-
 	targetProject := os.Getenv("PROJECT")
 	targetRegion := os.Getenv("REGION")
 	targetCluster := os.Getenv("CLUSTER")
-	log.Printf("GCP Project: " + targetProject)
-	log.Printf("GCP Region: " + targetRegion)
-	log.Printf("GCP DataProc Cluster: " + targetCluster)
 
-	if len(targetCluster) > 0 {
-		return clusterURL(r.Context(), targetProject, targetRegion, targetCluster)
-	}
-	hostParts := strings.Split(r.Host, "-dot-")
-	if len(hostParts) < 2 {
-		return nil, fmt.Errorf("unable to identify cluster name from hostname")
-	}
-	return clusterURL(r.Context(), targetProject, targetRegion, hostParts[0])
+	return clusterURL(r.Context(), targetProject, targetRegion, targetCluster)
 }
 
-func proxy() http.Handler {
-	tokenSource := oauth2.ReuseTokenSource(nil, defaultTokenSource(context.Background()))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !methodAllowed(r.Method) || !pathAllowed(r.URL.Path) {
-			log.Printf("Method %+v is not allowed", r.Method)
-			log.Printf("Path %+v is not allowed", r.URL.Path)
-			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
-			return
-		}
-		
-		backendURL, err := targetBackendURL(r)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		log.Printf("backendURL: %+v", backendURL)
-		log.Printf("r.URL.Path: %+v", r.URL.Path)
+func handler(w http.ResponseWriter, r *http.Request) {
+	if !methodAllowed(r.Method) || !pathAllowed(r.URL.Path) {
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return
+	}
 
-		proxy := httputil.NewSingleHostReverseProxy(backendURL)
-		if backendURL.Scheme == "http" {
-			proxy.Transport = &http2.Transport{
-				AllowHTTP: true,
-				DialTLSContext: func(ctx context.Context, network string, addr string, cfg *tls.Config) (net.Conn, error) {
-					return net.Dial(network, addr)
-				},
-			}
-		}
-		log.Printf("[%q] proxied request for %+v: %+v", backendURL, r.URL.Path, r)
-		token, err := tokenSource.Token()
+	backendURL, err := targetBackendURL(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Create a new reverse proxy
+	proxy := httputil.NewSingleHostReverseProxy(backendURL)
+
+	// Customize the director function to modify the request
+	originalDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		originalDirector(req)
+		req.Host = backendURL.Host
+		req.URL.Path = r.URL.Path
+		req.URL.RawPath = r.URL.Path
+		req.URL.Scheme = backendURL.Scheme
+		req.URL.Host = backendURL.Host
+
+		// Get and set the authentication token
+		token, err := reusableTokenSource.Token()
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Printf("Error getting token: %v", err)
 			return
 		}
-		token.SetAuthHeader(r)
-		r.Host = backendURL.Host
-		r.URL.Scheme = backendURL.Scheme
-		proxy.ServeHTTP(w, r)
-	})
+		token.SetAuthHeader(req)
+		log.Printf("[%q] proxied request for %+v: %+v", backendURL, r.URL.Path, req)
+	}
+
+	// Create a custom transport with explicit settings
+	transport := &http.Transport{
+		// Ensure we maintain the host header
+		ForceAttemptHTTP2: true,
+		// Configure proper TLS settings
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true, // Only for development
+		},
+		// Set proper timeouts and connection settings
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
+	// Assign our custom transport to the proxy
+	proxy.Transport = transport
+	// Set up custom transport for HTTP/2 if needed
+	if backendURL.Scheme == "http" {
+		proxy.Transport = &http2.Transport{
+			AllowHTTP: true,
+			DialTLSContext: func(ctx context.Context, network string, addr string, cfg *tls.Config) (net.Conn, error) {
+				return net.Dial(network, addr)
+			},
+		}
+	}
+
+	proxy.ServeHTTP(w, r)
 }
 
 func main() {
 	flag.Parse()
-	handler := proxy()
-	log.Printf("Starting proxy on port 8080")
-	err := http.ListenAndServe(":8080", handler)
-	if err != nil {
-		panic(err)
-	}
+	reusableTokenSource = oauth2.ReuseTokenSource(nil, defaultTokenSource(context.Background()))
+	http.HandleFunc("/", handler)
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
