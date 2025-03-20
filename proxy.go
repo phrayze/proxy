@@ -27,7 +27,7 @@ import (
 
 var (
 	backend             = flag.String("backend", "", "url of the backend HTTP server")
-	allowedMethods      = flag.String("allowed-methods", "http.MethodGet, http.MethodHead", "Set of allowed HTTP methods")
+	allowedMethods      = flag.String("allowed-methods", "GET, HEAD", "Set of allowed HTTP methods")
 	allowedPathPrefixes = flag.String("allowed-path-prefixes", "/", "Set of allowed HTTP request URL paths")
 	endpoint            = "" // will be defined later
 )
