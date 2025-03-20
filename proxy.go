@@ -174,8 +174,8 @@ func proxy() http.Handler {
 	tokenSource := oauth2.ReuseTokenSource(nil, defaultTokenSource(context.Background()))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !methodAllowed(r.Method) || !pathAllowed(r.URL.Path) {
-			log.PrintF("Method %+v is not allowed", r.method)
-			log.PrintF("Path %+v is not allowed", r.URL.Path)
+			log.Printf("Method %+v is not allowed", r.method)
+			log.Printf("Path %+v is not allowed", r.URL.Path)
 			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 			return
 		}
