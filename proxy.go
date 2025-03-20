@@ -16,6 +16,7 @@ import (
 
 	dataproc "cloud.google.com/go/dataproc/apiv1"
 	"cloud.google.com/go/dataproc/apiv1/dataprocpb"
+	gtransport "google.golang.org/api/transport/grpc"
 
 	"golang.org/x/net/http2"
 	"golang.org/x/oauth2"
@@ -90,7 +91,7 @@ func pathAllowed(path string) bool {
 	}
 	return false
 }
-
+/*
 // NewClusterControllerClient creates a new cluster controller client.
 func NewClusterControllerClient(ctx context.Context, opts ...option.ClientOption) (*dataproc.ClusterControllerClient, error) {
 	conn, err := grpc.Dial(endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock()) // Corrected line
@@ -101,6 +102,16 @@ func NewClusterControllerClient(ctx context.Context, opts ...option.ClientOption
 	if err != nil {
 		return nil, err
 	}
+	return clusterControllerClient, nil
+}
+*/
+func NewClusterControllerClient(ctx context.Context, opts ...option.ClientOption) (dataproc.ClusterControllerClient, error) {
+	connPool, err := gtransport.DialPool(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	clusterControllerClient := dataproc.NewClusterControllerClient(connPool)
+	
 	return clusterControllerClient, nil
 }
 
