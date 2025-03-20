@@ -27,11 +27,10 @@ import (
 
 var (
 	backend             = flag.String("backend", "", "url of the backend HTTP server")
-	allowedMethods      = flag.String("allowed-methods", "GET,HEAD", "Comma-separated list of allowed HTTP methods")
-	allowedPathPrefixes = flag.String("allowed-path-prefixes", "/", "Comma-separated list of allowed HTTP request URL paths")
+	allowedMethods      = flag.String("allowed-methods", "http.MethodGet, http.MethodHead", "Set of allowed HTTP methods")
+	allowedPathPrefixes = flag.String("allowed-path-prefixes", "/", "Set of allowed HTTP request URL paths")
 	endpoint            = "" // will be defined later
 )
-
 // configHelperResp corresponds to the JSON output of the `gcloud config-helper` command.
 type configHelperResp struct {
 	Credential struct {
@@ -102,26 +101,17 @@ func NewClusterControllerClient(ctx context.Context, opts ...option.ClientOption
 	if err != nil {
 		return nil, err
 	}
-	return clusterControllerClient, nil // Corrected line
+	return clusterControllerClient, nil
 }
 
 func clusterURL(ctx context.Context, project, region, clusterName string) (*url.URL, error) {
-	fullEndpoint := region + "-dataproc.googleapis.com:443"
+	endpoint := region + "-dataproc.googleapis.com:443"
 	// Create a new Dataproc client.
 	//define endpoint here as the region is known
-	endpoint = fullEndpoint
-	client, err := NewClusterControllerClient(ctx, option.WithEndpoint(fullEndpoint))
+	client, err := NewClusterControllerClient(ctx, option.WithEndpoint(endpoint))
 	if err != nil {
 		log.Fatalf("failed to create client: %v", err)
 	}
-	defer func(client *dataproc.ClusterControllerClient) {
-		if client != nil {
-			err := client.Close()
-			if err != nil {
-				log.Fatalf("failed to close client: %v", err)
-			}
-		}
-	}(client)
 
 	// Build the GetCluster request.
 	req := &dataprocpb.GetClusterRequest{
@@ -136,6 +126,7 @@ func clusterURL(ctx context.Context, project, region, clusterName string) (*url.
 		log.Fatalf("failed to get cluster: %v", err)
 	}
 
+	/*
 	// Check if InternalIpOnly is empty before using it
 	if cluster.Config == nil || cluster.Config.GceClusterConfig == nil {
 		return nil, fmt.Errorf("cluster %s has no GceClusterConfig", clusterName)
@@ -144,6 +135,7 @@ func clusterURL(ctx context.Context, project, region, clusterName string) (*url.
 	if !cluster.Config.GceClusterConfig.GetInternalIpOnly() {
 		return nil, fmt.Errorf("cluster %s is not configured for internal IP only", clusterName)
 	}
+	*/
 
 	for _, endpoint := range cluster.Config.EndpointConfig.HttpPorts {
 		u, err := url.Parse(endpoint)
@@ -167,7 +159,6 @@ func targetBackendURL(r *http.Request) (*url.URL, error) {
 	log.Printf("GCP Project: " + targetProject)
 	log.Printf("GCP Region: " + targetRegion)
 	log.Printf("GCP DataProc Cluster: " + targetCluster)
-	log.Printf("Request?: " + r.Host)
 
 	if len(targetCluster) > 0 {
 		return clusterURL(r.Context(), targetProject, targetRegion, targetCluster)
@@ -186,12 +177,15 @@ func proxy() http.Handler {
 			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 			return
 		}
+		
 		backendURL, err := targetBackendURL(r)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		log.Printf("backendURL: %+v", backendURL)
+		log.Printf("r.URL.Path: %+v", r.URL.Path)
+
 		proxy := httputil.NewSingleHostReverseProxy(backendURL)
 		if backendURL.Scheme == "http" {
 			proxy.Transport = &http2.Transport{
